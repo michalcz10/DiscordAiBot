@@ -251,9 +251,6 @@ def process_think_section(response: str):
     
     # Remove leading and trailing whitespace
     response = response.strip()
-    
-    # Debug: Print the response after processing
-    print(f"Processed Response: {response}")
     return response
 
 # Initialize Discord client
@@ -341,27 +338,34 @@ async def on_message(message):
         
         # Limit the user's chat history to the last MAX_HISTORY_MESSAGES messages
         chat_history[user_id] = user_chat_history[-MAX_HISTORY_MESSAGES:]
-        
+
         # Extract important information from the user's input only
         extracted_infos = extract_important_info(prompt)
         if extracted_infos:
             for important_info in extracted_infos:
-                # If no name is specified, associate the information with the current user
+                # If the extracted info is not user-specific, associate it with the current user
                 if "name" not in important_info:
-                    print("Storing non-user-specific info for the current user:", important_info)
+                    print("No name found in extracted info. Associating with current user.")
                     target_user_id = user_id  # Use the current user's ID
-                    extracted_name = None  # No name is extracted
                 else:
-                    # Skip if the extracted info is not user-specific
-                    if "name" not in important_info:
-                        print("Skipping non-user-specific info:", important_info)
-                        continue
-
-                    extracted_name = important_info.get("name", "").lower() if important_info.get("name") else None
+                    extracted_name = important_info.get("name", "").lower()
                     target_user_id = None
 
-                    # Priority 1: Check existing user data for name match
-                    if extracted_name:
+                    # Priority 1: Check mentioned users in the prompt
+                    mentioned_users = [extract_user_id_from_mention(word) for word in prompt.split() 
+                                    if word.startswith("<@") and word.endswith(">")]
+                    if mentioned_users:
+                        target_user_id = mentioned_users[0]  # Use the first mentioned user's ID
+                        print(f"Using mentioned user ID: {target_user_id}")
+
+                    # Priority 2: Check name_to_id mapping
+                    if not target_user_id and extracted_name:
+                        target_user_id = long_term_memory.get("name_to_id", {}).get(extracted_name)
+                        if target_user_id:
+                            print(f"Using name_to_id mapping: {extracted_name} -> {target_user_id}")
+
+                    # Priority 3: Check existing user data for name match
+                    if not target_user_id and extracted_name:
                         for user_id, user_data in long_term_memory.items():
                             if user_id in ["bot", "name_to_id"]:
                                 continue  # Skip bot and name_to_id sections
@@ -371,23 +375,9 @@ async def on_message(message):
                                 print(f"Found existing user {user_id} with name '{extracted_name}'")
                                 break
 
-                    # Priority 2: Use mentioned users if no existing match
-                    if not target_user_id:
-                        mentioned_users = [extract_user_id_from_mention(word) for word in prompt.split() 
-                                        if word.startswith("<@") and word.endswith(">")]
-                        if mentioned_users:
-                            target_user_id = mentioned_users[0]
-                            print(f"Using mentioned user ID: {target_user_id}")
-
-                    # Priority 3: Use name_to_id mapping
-                    if not target_user_id and extracted_name:
-                        target_user_id = long_term_memory.get("name_to_id", {}).get(extracted_name)
-                        if target_user_id:
-                            print(f"Using name_to_id mapping: {extracted_name} -> {target_user_id}")
-
                     # Fallback: Current user's ID
                     if not target_user_id:
-                        target_user_id = user_id
+                        target_user_id = user_id  # Use the current user's ID
                         print(f"Fallback to current user ID: {user_id}")
 
                     # Update name_to_id mapping if we found a better match
@@ -401,7 +391,7 @@ async def on_message(message):
                 if target_user_id != "name_to_id":  # Ensure we're not storing in the name_to_id section
                     user_entry = long_term_memory.setdefault(target_user_id, {})
                     for key, value in important_info.items():
-                        if key != "name":  # Name is handled through the mapping
+                        if key != "name" and value:  # Skip empty fields
                             if key in user_entry:
                                 # If the key already exists, append the new value
                                 if isinstance(user_entry[key], list):
@@ -413,8 +403,8 @@ async def on_message(message):
                                 user_entry[key] = value
 
                     # Special case: Ensure name is stored in the user's entry
-                    if extracted_name and "name" not in user_entry:
-                        user_entry["name"] = extracted_name.capitalize()
+                    if "name" in important_info and "name" not in user_entry:
+                        user_entry["name"] = important_info["name"].capitalize()
         
         # Save the updated chat history and long-term memory
         save_chat_history(chat_history)
@@ -422,9 +412,6 @@ async def on_message(message):
         
         # Process the <think></think> section
         formatted_response = process_think_section(response)
-        
-        # Debug print to check response length
-        print(f"Response length: {len(formatted_response)}")
         
         # Split the response into chunks of 2000 characters if needed
         if len(formatted_response) > 2000:

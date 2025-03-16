@@ -9,3 +9,5 @@ Default setting uses localhost for ollama.
 Make sure to have all dependencies!
 
 Run bot with pyton in terminal/cmd.
+
+note bot was made for one server and works in all chanels where permissions are given. Multiple servers will share memory when using advanced model. It cannot generate multiple prompts at the same time.
